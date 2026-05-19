@@ -1,0 +1,655 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── User Profile (synced from Supabase Auth) ──────────────────────────────
+
+model User {
+  id          String   @id @default(uuid()) // matches Supabase auth.users.id
+  email       String   @unique
+  name        String?
+  image       String?
+  memberships AccountMember[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+// ─── Account & Multi-tenancy ────────────────────────────────────────────────
+
+model Account {
+  id                 String   @id @default(cuid())
+  name               String
+  slug               String   @unique
+  description        String?
+  color              String?
+  onboardingStep     Int      @default(1) @map("onboarding_step")
+  onboardingComplete Boolean  @default(false) @map("onboarding_complete")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  members            AccountMember[]
+  invites            AccountInvite[]
+  socialConnections  SocialConnection[]
+  profile            AccountProfile?
+  skillConfigs       AccountSkillConfig[]
+  personas           Persona[]
+  agents             Agent[]
+  stories            Story[]
+  busEvents          BusEvent[]
+  marketSignals      MarketSignal[]
+  newsSignals        NewsSignal[]
+  trendSignals       TrendSignal[]
+  economicEvents     EconomicEvent[]
+  agentMessages      AgentMessage[]
+  chatMessages       ChatMessage[]
+  competitorReports  CompetitorReport[]
+  earningsEvents     EarningsEvent[]
+  insiderTrades      InsiderTrade[]
+
+  @@map("accounts")
+}
+
+model AccountMember {
+  id         String     @id @default(cuid())
+  userId     String     @map("user_id")
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId  String     @map("account_id")
+  account    Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  role       MemberRole @default(VIEWER)
+  invitedAt  DateTime   @default(now()) @map("invited_at")
+  acceptedAt DateTime?  @map("accepted_at")
+
+  @@unique([userId, accountId])
+  @@map("account_members")
+}
+
+model AccountInvite {
+  id         String     @id @default(cuid())
+  email      String
+  accountId  String     @map("account_id")
+  account    Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  role       MemberRole @default(VIEWER)
+  token      String     @unique
+  expiresAt  DateTime   @map("expires_at")
+  acceptedAt DateTime?  @map("accepted_at")
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  @@index([token])
+  @@map("account_invites")
+}
+
+model SocialConnection {
+  id           String         @id @default(cuid())
+  accountId    String         @map("account_id")
+  account      Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  platform     SocialPlatform
+  handle       String
+  displayName  String?        @map("display_name")
+  accessToken  String?        @map("access_token")  // encrypted, placeholder
+  refreshToken String?        @map("refresh_token") // encrypted, placeholder
+  connected    Boolean        @default(false)
+  metadata     Json           @default("{}")
+  connectedAt  DateTime?      @map("connected_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  @@unique([accountId, platform, handle])
+  @@map("social_connections")
+}
+
+model AccountProfile {
+  id                     String   @id @default(cuid())
+  accountId              String   @unique @map("account_id")
+  account                Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  // Identity & Positioning
+  markets                String[]
+  targetAudience         String   @map("target_audience")
+  secondaryAudience      String?  @map("secondary_audience")
+  editorialAngle         String   @map("editorial_angle")
+  brandName              String?  @map("brand_name")
+  brandWebsite           String?  @map("brand_website")
+  brandOneLiner          String?  @map("brand_one_liner")
+
+  // Voice & Tone
+  voicePersonality       String   @map("voice_personality")
+  secondaryVoice         String?  @map("secondary_voice")
+  toneFormal             Int      @default(5) @map("tone_formal")           // 1-10
+  toneSeriousness        Int      @default(5) @map("tone_seriousness")      // 1-10
+  toneProvocativeness    Int      @default(3) @map("tone_provocativeness")  // 1-10
+  toneTechnical          Int      @default(5) @map("tone_technical")        // 1-10
+  admiredAccounts        String[] @map("admired_accounts")
+  alwaysUseTerms         String[] @map("always_use_terms")
+  neverUseTerms          String[] @map("never_use_terms")
+
+  // Content Strategy
+  contentGoals           Json     @map("content_goals")     // ranked array
+  contentMix             Json     @map("content_mix")       // { analysis: 40, news: 30, ... }
+  reactionSpeed          String   @map("reaction_speed")    // IMMEDIATE | FAST | MEASURED | NEXT_WINDOW
+  prepositionEnabled     Boolean  @default(false) @map("preposition_enabled")
+  sentimentArbEnabled    Boolean  @default(false) @map("sentiment_arb_enabled")
+
+  // Compliance & Guardrails
+  isRegulated            Boolean  @default(false) @map("is_regulated")
+  regulatoryJurisdiction String?  @map("regulatory_jurisdiction")
+  requiredDisclaimers    String[] @map("required_disclaimers")
+  offLimitsTopics        String[] @map("off_limits_topics")
+  predictionSensitivity  String   @default("MODERATE") @map("prediction_sensitivity") // CONSERVATIVE | MODERATE | AGGRESSIVE
+  approvalRequirement    String   @default("ALL") @map("approval_requirement")        // ALL | HIGH_CRITICAL_ONLY | TRUST_AGENTS
+
+  // Intelligence Triggers
+  triggerThresholds      Json     @default("{}") @map("trigger_thresholds") // { forex: 0.5, crypto: 3, ... }
+
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@map("account_profiles")
+}
+
+model AccountSkillConfig {
+  id        String    @id @default(cuid())
+  accountId String    @map("account_id")
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  skillType SkillType @map("skill_type")
+  enabled   Boolean   @default(true)
+  config    Json      @default("{}")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@unique([accountId, skillType])
+  @@map("account_skill_configs")
+}
+
+// ─── Core Domain Models ─────────────────────────────────────────────────────
+
+model Agent {
+  id                 String      @id @map("agent_id")
+  accountId          String      @map("account_id")
+  account            Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name               String
+  desk               AgentDesk
+  role               String
+  status             AgentStatus @default(IDLE)
+  model              String
+  adapterType        String      @map("adapter_type")
+  currentTask        String?     @map("current_task")
+  lastAction         String?     @map("last_action")
+  lastActionAt       DateTime?   @map("last_action_at")
+  budgetMonthlyUsd   Float       @map("budget_monthly_usd")
+  spentMonthlyUsd    Float       @default(0) @map("spent_monthly_usd")
+  costPerOutput      Float       @map("cost_per_output")
+  outputsToday       Int         @default(0) @map("outputs_today")
+  instrumentsWatched String[]    @map("instruments_watched")
+  toolNames          String[]    @default([]) @map("tool_names")
+  assignedPersona    String?     @map("assigned_persona")
+  enabled            Boolean     @default(true)
+  adapterConfig      Json        @default("{}") @map("adapter_config")
+  heartbeatCron      String?     @map("heartbeat_cron")
+  systemPromptOverride String?   @map("system_prompt_override") @db.Text
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  runs               AgentRun[]
+  messages           AgentMessage[]
+  competitorReports  CompetitorReport[]
+
+  @@index([accountId])
+  @@map("agents")
+}
+
+model Story {
+  id                 String        @id @map("story_id")
+  accountId          String        @map("account_id")
+  account            Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  status             StoryStatus   @default(DETECTED)
+  priority           StoryPriority @default(MEDIUM)
+  entity             String
+  entityType         EntityType    @map("entity_type")
+  headline           String
+  signalsStacked     Json          @default("[]") @map("signals_stacked")
+  stackingScore      Float         @default(0) @map("stacking_score")
+  eicDirective       String?       @map("eic_directive")
+  assignedPersona    String?       @map("assigned_persona")
+  draftContent       String?       @map("draft_content")
+  scheduledTime      DateTime?     @map("scheduled_time")
+  publishedUrl       String?       @map("published_url")
+  performance        Json?
+  auditTrail         Json          @default("[]") @map("audit_trail")
+  isPrepositioned    Boolean       @default(false) @map("is_prepositioned")
+  sentimentArbitrage Boolean       @default(false) @map("sentiment_arbitrage")
+  viralityScore      Float?        @map("virality_score")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  busEvents BusEvent[]
+
+  @@index([accountId])
+  @@map("stories")
+}
+
+model Persona {
+  id              String   @id @map("persona_id")
+  accountId       String   @map("account_id")
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountHandle   String   @map("account_handle")
+  platform        Platform
+  displayName     String   @map("display_name")
+  voice           String
+  avatarColor     String   @map("avatar_color")
+  topicWeights    Json     @map("topic_weights")
+  maxPostsPerDay  Int      @map("max_posts_per_day")
+  postsToday      Int      @default(0) @map("posts_today")
+  performance7d   Json     @map("performance_7d")
+  offLimitsTopics String[] @map("off_limits_topics")
+  postingHours    Json     @map("posting_hours")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([accountId, accountHandle])
+  @@index([accountId])
+  @@map("personas")
+}
+
+model BusEvent {
+  id        String        @id @map("event_id")
+  accountId String        @map("account_id")
+  account   Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type      EventType
+  agent     String
+  message   String
+  storyId   String?       @map("story_id")
+  story     Story?        @relation(fields: [storyId], references: [id], onDelete: SetNull)
+  timestamp DateTime      @default(now())
+  priority  EventPriority @default(NORMAL)
+
+  @@index([accountId])
+  @@index([storyId])
+  @@index([timestamp])
+  @@map("bus_events")
+}
+
+// ─── Signal Models ──────────────────────────────────────────────────────────
+
+model MarketSignal {
+  id                  String     @id @map("signal_id")
+  accountId           String     @map("account_id")
+  account             Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  asset               String
+  entityType          EntityType @map("entity_type")
+  priceChangePct      Float      @map("price_change_pct")
+  volumeVsAvg         Float      @map("volume_vs_avg")
+  storyPotentialScore Float      @map("story_potential_score")
+  agentInterpretation String     @map("agent_interpretation")
+  timestamp           DateTime   @default(now())
+
+  @@index([accountId])
+  @@index([timestamp])
+  @@map("market_signals")
+}
+
+model NewsSignal {
+  id              String   @id @map("signal_id")
+  accountId       String   @map("account_id")
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  source          String
+  headline        String
+  relevanceScore  Float    @map("relevance_score")
+  hasDerivAngle   Boolean  @map("has_deriv_angle")
+  derivAngleLabel String?  @map("deriv_angle_label")
+  timestamp       DateTime @default(now())
+
+  @@index([accountId])
+  @@index([timestamp])
+  @@map("news_signals")
+}
+
+model TrendSignal {
+  id                 String    @id @map("signal_id")
+  accountId          String    @map("account_id")
+  account            Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  topic              String
+  volume             Int
+  velocity           Velocity
+  sentiment          Sentiment
+  opportunityFlagged Boolean   @map("opportunity_flagged")
+  timestamp          DateTime  @default(now())
+
+  @@index([accountId])
+  @@index([timestamp])
+  @@map("trend_signals")
+}
+
+model EconomicEvent {
+  id        String              @id @map("event_id")
+  accountId String              @map("account_id")
+  account   Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  time      DateTime
+  name      String
+  impact    ImpactLevel
+  status    EconomicEventStatus
+  actual    String?
+  expected  String?
+
+  @@index([accountId])
+  @@index([time])
+  @@map("economic_events")
+}
+
+model EarningsEvent {
+  id               String         @id @map("event_id")
+  accountId        String         @map("account_id")
+  account          Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol           String
+  reportDate       DateTime       @map("report_date")
+  epsEstimate      Float?         @map("eps_estimate")
+  epsActual        Float?         @map("eps_actual")
+  revenueEstimate  Float?         @map("revenue_estimate")
+  revenueActual    Float?         @map("revenue_actual")
+  status           EarningsStatus
+  timestamp        DateTime       @default(now())
+
+  @@index([accountId])
+  @@index([reportDate])
+  @@map("earnings_events")
+}
+
+model InsiderTrade {
+  id                   String   @id @map("trade_id")
+  accountId            String   @map("account_id")
+  account              Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol               String
+  filingDate           DateTime @map("filing_date")
+  transactionDate      DateTime @map("transaction_date")
+  reportingName        String   @map("reporting_name")
+  typeOfOwner          String   @map("type_of_owner")
+  transactionType      String   @map("transaction_type")
+  securitiesTransacted Float    @map("securities_transacted")
+  price                Float
+  securityName         String   @map("security_name")
+  formType             String   @map("form_type")
+  url                  String?
+  timestamp            DateTime @default(now())
+
+  @@index([accountId])
+  @@index([timestamp])
+  @@map("insider_trades")
+}
+
+// ─── Competitor Intelligence ────────────────────────────────────────────────
+
+model CompetitorReport {
+  id                   String   @id @default(cuid())
+  accountId            String   @map("account_id")
+  account              Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  agentId              String   @map("agent_id")
+  agent                Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  reportType           String   @map("report_type")   // BREAKING_GAP | NARRATIVE_SATURATION | BEGINNER_GAP | MISLEADING_CONTENT | FORMAT_TREND | GENERAL_INTELLIGENCE
+  source               String                          // outlet or creator name + platform
+  observation          String                          // factual description of what was observed
+  editorialOpportunity String   @map("editorial_opportunity")
+  urgency              String                          // HIGH | MEDIUM | LOW
+  recommendedAction    String   @map("recommended_action") // COVER_NOW | COUNTER_NARRATIVE | MONITOR | IGNORE
+  complianceNote       String?  @map("compliance_note")
+  topics               String[] // extracted topic keywords for EIC saturation checks
+  engagementSummary    Json?    @map("engagement_summary") // { total_posts, total_likes, total_views, total_comments, top_post: { text, url, likes, views } }
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([accountId])
+  @@index([accountId, reportType])
+  @@index([accountId, urgency])
+  @@index([createdAt])
+  @@map("competitor_reports")
+}
+
+// ─── Agent Execution Tracking ───────────────────────────────────────────────
+
+model AgentRun {
+  id          String    @id @default(cuid())
+  agentId     String    @map("agent_id")
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  storyId     String?   @map("story_id")
+  status      RunStatus @default(RUNNING)
+  graphName   String    @map("graph_name")
+  input       Json      @default("{}")
+  output      Json?
+  error       String?
+  tokenCount  Int       @default(0) @map("token_count")
+  costUsd     Float     @default(0) @map("cost_usd")
+  startedAt   DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  steps AgentStep[]
+  tools ToolInvocation[]
+
+  @@index([agentId])
+  @@index([storyId])
+  @@map("agent_runs")
+}
+
+model AgentStep {
+  id        String    @id @default(cuid())
+  runId     String    @map("run_id")
+  run       AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  nodeName  String    @map("node_name")
+  input     Json      @default("{}")
+  output    Json?
+  startedAt DateTime  @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+
+  @@index([runId])
+  @@map("agent_steps")
+}
+
+model ToolInvocation {
+  id        String    @id @default(cuid())
+  runId     String    @map("run_id")
+  run       AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  toolName  String    @map("tool_name")
+  input     Json      @default("{}")
+  output    Json?
+  startedAt DateTime  @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  error     String?
+
+  @@index([runId])
+  @@map("tool_invocations")
+}
+
+model AgentMessage {
+  id        String      @id @default(cuid())
+  accountId String      @map("account_id")
+  account   Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  agentId   String      @map("agent_id")
+  agent     Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  role      MessageRole
+  content   String
+  metadata  Json        @default("{}")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  @@index([accountId])
+  @@index([agentId, createdAt])
+  @@map("agent_messages")
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  accountId String   @map("account_id")
+  threadId  String?  @map("thread_id")
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  role      ChatRole
+  content   String
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([accountId])
+  @@index([accountId, threadId])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────────────
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum SocialPlatform {
+  X
+  INSTAGRAM
+  LINKEDIN
+  TIKTOK
+  YOUTUBE
+  THREADS
+  REDDIT
+  TELEGRAM
+}
+
+enum SkillType {
+  TECHNICAL_ANALYSIS
+  NEWS_MONITORING
+  ECONOMIC_CALENDAR
+  EARNINGS_CALENDAR
+  SOCIAL_SENTIMENT
+  REGULATORY_MONITOR
+  THREAD_CREATION
+  CHART_GENERATION
+  MEME_CONTENT
+  AUTO_REPLY
+  COMPETITOR_TRACKING
+  TREND_SURFACING
+}
+
+enum AgentDesk {
+  EIC
+  DATA_DESK
+  CONTENT_DESK
+  ENGAGEMENT_DESK
+}
+
+enum AgentStatus {
+  ACTIVE
+  IDLE
+  BUSY
+  PAUSED
+  ERROR
+}
+
+enum StoryStatus {
+  DETECTED
+  RANKED
+  EIC_APPROVED
+  WRITING
+  REVISION
+  HUMAN_REVIEW
+  SCHEDULED
+  PUBLISHED
+  REJECTED
+  KILLED
+}
+
+enum StoryPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum EntityType {
+  FOREX
+  CRYPTO
+  INDEX
+  EQUITY
+  COMMODITY
+}
+
+enum EventType {
+  SIGNAL_DETECTED
+  STORY_CREATED
+  EIC_DECISION
+  WRITER_ASSIGNED
+  DRAFT_COMPLETE
+  HUMAN_REVIEW_REQUIRED
+  POST_SCHEDULED
+  POST_PUBLISHED
+  BUDGET_WARNING
+  TREND_ALERT
+  PREPOSITION_ARMED
+  SENTIMENT_ARBITRAGE_DETECTED
+  HYPE_ALERT
+}
+
+enum EventPriority {
+  HIGH
+  NORMAL
+  LOW
+}
+
+// Keep Platform for Persona (backward compat), SocialPlatform for connections
+enum Platform {
+  X
+  INSTAGRAM
+  LINKEDIN
+  TIKTOK
+  YOUTUBE
+  THREADS
+  REDDIT
+  TELEGRAM
+}
+
+enum Velocity {
+  ACCELERATING
+  STABLE
+  FADING
+}
+
+enum Sentiment {
+  BULLISH
+  BEARISH
+  NEUTRAL
+  MIXED
+}
+
+enum ImpactLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum EconomicEventStatus {
+  UPCOMING
+  RELEASED
+}
+
+enum EarningsStatus {
+  UPCOMING
+  REPORTED
+}
+
+enum RunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum MessageRole {
+  system
+  human
+  ai
+  tool
+}
+
+enum ChatRole {
+  user
+  eic
+}
